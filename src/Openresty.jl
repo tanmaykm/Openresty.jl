@@ -3,7 +3,7 @@ module Openresty
 include("../deps/deps.jl")
 
 export OpenrestyCtx
-export setup, start, stop, restart, isrunning
+export setup, start, stop, restart, isrunning, reopen, reload
 
 const nginxbindir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/sbin"))
 const htmltemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/html"))
