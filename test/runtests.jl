@@ -59,7 +59,7 @@ function test()
     nginx = OpenrestyCtx(workdir)
 
     @info("setting up Openresty", workdir)
-    setup(nginx, cfgfile)
+    @test nothing === setup(nginx, cfgfile)
     @test isfile(Openresty.conffile(nginx))
 
     @info("starting Openresty")
@@ -75,6 +75,8 @@ function test()
     sleep(2)
     @test isfile(Openresty.pidfile(nginx))
     @test isrunning(nginx)
+    @test nothing === reopen(nginx)
+    @test nothing === reload(nginx)
 
     test_nginx_config()
 
