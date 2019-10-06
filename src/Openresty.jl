@@ -2,9 +2,13 @@ module Openresty
 
 include("../deps/deps.jl")
 
+export OpenrestyCtx
+export setup, start, stop, restart, isrunning
+
 const nginxbindir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/sbin"))
 const htmltemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/html"))
 const conftemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/conf"))
+const luapath = joinpath(dirname(dirname(nginxbindir)), "lualib", "?.lua")
 
 function __init__()
     check_deps()
