@@ -58,13 +58,21 @@ function test()
     cfgfile = createconfig(workdir)
     nginx = OpenrestyCtx(workdir)
 
-    @info("setting up Openresty", workdir)
-    @test nothing === setup(nginx, cfgfile; lua_package_path="~/lua/?.lua")
+    tmpdir1 = mktempdir()
+    tmpdir2 = mktempdir()
+    @info("setting up Openresty", workdir, tmpdir1, tmpdir2)
+
+    # incorrect lua path should throw error
+    @test_throws Exception setup(nginx, cfgfile; lua_package_path=joinpath(tmpdir1, "mylualibs"))
+    # setup with correct lua path
+    @test nothing === setup(nginx, cfgfile; lua_package_path=tmpdir1)
     @test isfile(Openresty.conffile(nginx))
     confstr = read(Openresty.conffile(nginx), String)
-    @test occursin("~/lua/?.lua", confstr)
-    @test occursin(Openresty.luapath, confstr)
-    @test occursin("$(Openresty.luapath);~/lua/?.lua;;", confstr)
+    userlib1 = joinpath(Openresty.user_lua_lib_folder(nginx,tmpdir1), "?.lua")
+    syslib = "$(Openresty.luadir(nginx))/lualib/?.lua"
+    @test occursin(userlib1, confstr)
+    @test occursin(syslib, confstr)
+    @test occursin("$syslib;$userlib1;;", confstr)
 
     @info("starting Openresty")
     start(nginx)
@@ -94,10 +102,12 @@ function test()
 
     @test_throws Exception setup(nginx, cfgfile)
     @test nothing === setup(nginx, cfgfile; force=true)
-    @test nothing === setup(nginx, cfgfile; force=true, lua_package_path=["~/lua/?.lua", "/a/different/path"])
+    @test nothing === setup(nginx, cfgfile; force=true, lua_package_path=[tmpdir1, tmpdir2])
 
     @info("cleaning up")
     rm(workdir; recursive=true, force=true)
+    rm(tmpdir1; recursive=true, force=true)
+    rm(tmpdir2; recursive=true, force=true)
     @info("done")
 
     nothing
