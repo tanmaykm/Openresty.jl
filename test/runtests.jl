@@ -11,7 +11,7 @@ events {
 http {
     access_log $workdir/logs/access.log;
     error_log $workdir/logs/error.log debug;
-    lua_package_path '$(Openresty.luapath);~/lua/?.lua;;';
+    lua_package_path 'OPENRESTY_LUA_PACKAGE_PATH';
     include       mime.types;
     server {
         listen 8080;
@@ -59,8 +59,12 @@ function test()
     nginx = OpenrestyCtx(workdir)
 
     @info("setting up Openresty", workdir)
-    @test nothing === setup(nginx, cfgfile)
+    @test nothing === setup(nginx, cfgfile; lua_package_path="~/lua/?.lua")
     @test isfile(Openresty.conffile(nginx))
+    confstr = read(Openresty.conffile(nginx), String)
+    @test occursin("~/lua/?.lua", confstr)
+    @test occursin(Openresty.luapath, confstr)
+    @test occursin("$(Openresty.luapath);~/lua/?.lua;;", confstr)
 
     @info("starting Openresty")
     start(nginx)
@@ -90,6 +94,7 @@ function test()
 
     @test_throws Exception setup(nginx, cfgfile)
     @test nothing === setup(nginx, cfgfile; force=true)
+    @test nothing === setup(nginx, cfgfile; force=true, lua_package_path=["~/lua/?.lua", "/a/different/path"])
 
     @info("cleaning up")
     rm(workdir; recursive=true, force=true)

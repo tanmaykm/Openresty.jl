@@ -39,7 +39,7 @@ pidfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "nginx.pid")
 accesslogfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "access.log")
 errorlogfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "error.log")
 
-function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; force::Bool=false, reset_templates::Bool=force)
+function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; force::Bool=false, reset_templates::Bool=force, lua_package_path::Union{String,Vector{String},Nothing}=nothing)
     existing_setup = isdir(confdir(ctx)) && isdir(htmldir(ctx)) && isdir(logsdir(ctx))
 
     existing_setup && !force && error("setup already exists, specify force=true to overwrite")
@@ -55,11 +55,33 @@ function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; for
         run(`cp -R -f $(joinpath(conftemplatedir, ".")) $(confdir(ctx))`)
         # copy over provided configuration
         (configfile !== nothing) && cp(configfile, conffile(ctx); force=true)
+        set_lua_package_path(ctx, lua_package_path)
     end
 
     if reset_templates || !existing_setup
         # copy over bundled templates
         run(`cp -R -f $(joinpath(htmltemplatedir, ".")) $(htmldir(ctx))`)
+    end
+    nothing
+end
+
+"""
+Replace all occurrences of OPENRESTY_LUA_PACKAGE_PATH in the configuration file by
+actual lua package path
+"""
+function set_lua_package_path(ctx::OpenrestyCtx, lua_package_path::Union{String,Vector{String},Nothing}=nothing)
+    config = read(conffile(ctx), String)
+    all_lua_paths = [luapath]
+    if isa(lua_package_path, String)
+        push!(all_lua_paths, lua_package_path)
+    elseif isa(lua_package_path, Vector{String})
+        append!(all_lua_paths, lua_package_path)
+    end
+    pathstr = join(all_lua_paths, ';') * ";;"
+
+    config = replace(config, "OPENRESTY_LUA_PACKAGE_PATH" => pathstr)
+    open(conffile(ctx), "w") do f
+        write(f, config)
     end
     nothing
 end
