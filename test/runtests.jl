@@ -2,8 +2,11 @@ using Test
 using Openresty
 using HTTP
 
-function createconfig(workdir::String)
-    cfg = """worker_processes  1;
+function createconfig(workdir::String, sudo::Bool=false)
+    me = ENV["USER"]
+    user = sudo ? "user $me $me;" : ""
+    cfg = """$user
+worker_processes  1;
 error_log $workdir/logs/error.log debug;
 events {
     worker_connections  1024;
@@ -52,11 +55,12 @@ function test_nginx_config()
     nothing
 end
 
-function test()
+function test(; sudo::Bool=false)
+    @info("testing with sudo=$sudo")
     workdir = mktempdir()
     mkpath(workdir)
-    cfgfile = createconfig(workdir)
-    nginx = OpenrestyCtx(workdir)
+    cfgfile = createconfig(workdir, sudo)
+    nginx = OpenrestyCtx(workdir; sudo=sudo)
 
     tmpdir1 = mktempdir()
     tmpdir2 = mktempdir()
@@ -113,4 +117,5 @@ function test()
     nothing
 end
 
-test()
+test(; sudo=false)
+test(; sudo=true)

@@ -23,10 +23,11 @@ end
 
 mutable struct OpenrestyCtx
     workdir::String
+    sudo::Bool
     pid::Union{Int,Nothing}
 
-    function OpenrestyCtx(workdir)
-        ctx = new(workdir, nothing)
+    function OpenrestyCtx(workdir; sudo::Bool=false)
+        ctx = new(workdir, sudo, nothing)
         readpid(ctx)
         ctx
     end
@@ -127,8 +128,8 @@ end
 
 function start(ctx::OpenrestyCtx)
     config = conffile(ctx)
-    @debug("starting \"$openresty -p $(ctx.workdir)\" from \"$nginxbindir\"")
-    command = Cmd(`$openresty -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
+    @debug("starting", openresty, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
+    command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir)` : `$openresty -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
     run(command; wait=false)
     sleep(1)
     readpid(ctx)
@@ -137,6 +138,7 @@ end
 
 isrunning(ctx::OpenrestyCtx) = (ctx.pid !== nothing) ? isrunning(ctx, ctx.pid) : false
 function isrunning(ctx::OpenrestyCtx, pid::Int)
+    # we do have read permission on cmdline even if process was started with sudo
     cmdlinefile = "/proc/$pid/cmdline"
     if isfile(cmdlinefile)
         cmdline = read(cmdlinefile, String)
@@ -180,7 +182,7 @@ signalreload(ctx::OpenrestyCtx) = signal(ctx, "reload")
 function signal(ctx::OpenrestyCtx, signal::String)
     if isrunning(ctx)
         @debug("sending signal $signal")
-        command = Cmd(`$openresty -p $(ctx.workdir) -s $signal`; dir=nginxbindir)
+        command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir) -s $signal` : `$openresty -p $(ctx.workdir) -s $signal`; dir=nginxbindir)
         run(command)
     end
     nothing
