@@ -8,8 +8,8 @@ export setup, start, stop, restart, isrunning, reopen, reload
 const nginxbindir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/sbin"))
 const htmltemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/html"))
 const conftemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/conf"))
-const lualib = joinpath(dirname(dirname(nginxbindir)), "lualib")
-const luapath = joinpath(lualib, "?.lua")
+const luapath = joinpath(dirname(dirname(nginxbindir)), "lualib", "?.lua")
+const luacpath = joinpath(dirname(dirname(nginxbindir)), "lualib", "?.so")
 
 function __init__()
     check_deps()
@@ -40,16 +40,14 @@ logsdir(ctx::OpenrestyCtx) = joinpath(ctx.workdir, "logs")
 pidfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "nginx.pid")
 accesslogfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "access.log")
 errorlogfile(ctx::OpenrestyCtx) = joinpath(logsdir(ctx), "error.log")
-luadir(ctx::OpenrestyCtx) = joinpath(ctx.workdir, "lua")
 
-function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; force::Bool=false, reset_templates::Bool=force, lua_package_path::Union{String,Vector{String},Nothing}=nothing)
+function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; force::Bool=false, reset_templates::Bool=force, lua_package_path::Union{String,Vector{String},Nothing}=nothing, lua_package_cpath::Union{String,Vector{String},Nothing}=nothing)
     existing_setup = isdir(confdir(ctx)) && isdir(htmldir(ctx)) && isdir(logsdir(ctx))
 
     existing_setup && !force && error("setup already exists, specify force=true to overwrite")
-    validate_user_lua_package_path(lua_package_path)
 
     # make the workdir
-    for path in (htmldir(ctx), confdir(ctx), logsdir(ctx), joinpath(luadir(ctx), "user"))
+    for path in (htmldir(ctx), confdir(ctx), logsdir(ctx))
         isdir(path) || mkpath(path)
     end
 
@@ -57,48 +55,14 @@ function setup(ctx::OpenrestyCtx, configfile::Union{String,Nothing}=nothing; for
     if force || !isfile(conffile(ctx))
         # copy over bundled base configurations
         cp(conftemplatedir, confdir(ctx); force=true)
-        #run(`cp -R -f $(joinpath(conftemplatedir, ".")) $(confdir(ctx))`)
         # copy over provided configuration
         (configfile !== nothing) && cp(configfile, conffile(ctx); force=true)
-        set_lua_package_path(ctx, lua_package_path)
+        set_lua_package_path(ctx, lua_package_path, lua_package_cpath)
     end
-
-    # place lua files
-    isdir(joinpath(luadir(ctx), "lualib")) || cp(lualib, joinpath(luadir(ctx), "lualib"); force=true)
-    setup_user_lua_package_from_path(ctx, lua_package_path; overwrite=reset_templates)
 
     # copy over bundled templates
     (reset_templates || !existing_setup) && cp(htmltemplatedir, htmldir(ctx); force=true)
-    #run(`cp -R -f $(joinpath(htmltemplatedir, ".")) $(htmldir(ctx))`)
 
-    #chmod(luadir(ctx), 0o755; recursive=true)
-    #chmod(htmldir(ctx), 0o755; recursive=true)
-
-    nothing
-end
-
-validate_user_lua_package_path(lua_package_path::Nothing) = nothing
-validate_user_lua_package_path(lua_package_path::String) = isdir(lua_package_path) || error("not a directory: $lua_package_path")
-function validate_user_lua_package_path(lua_package_path::Vector{String})
-    for path in lua_package_path
-        validate_user_lua_package_path(path)
-    end
-end
-
-function user_lua_lib_folder(ctx::OpenrestyCtx, lua_package_path::String)
-    basefolder = basename(lua_package_path)
-    joinpath(luadir(ctx), "user", basefolder)
-end
-
-setup_user_lua_package_from_path(ctx::OpenrestyCtx, lua_package_path::Nothing; overwrite::Bool=false) = nothing
-function setup_user_lua_package_from_path(ctx::OpenrestyCtx, lua_package_path::Vector{String}; overwrite::Bool=false)
-    for path in lua_package_path
-        setup_user_lua_package_from_path(ctx, path; overwrite=overwrite)
-    end
-end
-function setup_user_lua_package_from_path(ctx::OpenrestyCtx, lua_package_path::String; overwrite::Bool=false)
-    userfolder = user_lua_lib_folder(ctx, lua_package_path)
-    (overwrite || !isdir(userfolder)) && cp(lua_package_path, userfolder; force=true)
     nothing
 end
 
@@ -106,20 +70,25 @@ end
 Replace all occurrences of OPENRESTY_LUA_PACKAGE_PATH in the configuration file by
 actual lua package path
 """
-function set_lua_package_path(ctx::OpenrestyCtx, lua_package_path::Union{String,Vector{String},Nothing}=nothing)
+function set_lua_package_path(ctx::OpenrestyCtx, lua_package_path::Union{String,Vector{String},Nothing}=nothing, lua_package_cpath::Union{String,Vector{String},Nothing}=nothing)
     config = read(conffile(ctx), String)
-    all_lua_paths = [joinpath(luadir(ctx), "lualib")]
+    all_lua_paths = [luapath]
+    all_lua_cpaths = [luacpath]
     if isa(lua_package_path, String)
-        push!(all_lua_paths, user_lua_lib_folder(ctx, lua_package_path))
+        push!(all_lua_paths, lua_package_path)
     elseif isa(lua_package_path, Vector{String})
-        for path in lua_package_path
-            push!(all_lua_paths, user_lua_lib_folder(ctx, path))
-        end
+        append!(all_lua_paths, lua_package_path)
     end
-    all_lua_paths = [joinpath(path, "?.lua") for path in all_lua_paths]
+    if isa(lua_package_cpath, String)
+        push!(all_lua_cpaths, lua_package_cpath)
+    elseif isa(lua_package_cpath, Vector{String})
+        append!(all_lua_cpaths, lua_package_cpath)
+    end
     pathstr = join(all_lua_paths, ';') * ";;"
+    cpathstr = join(all_lua_cpaths, ';') * ";;"
 
     config = replace(config, "OPENRESTY_LUA_PACKAGE_PATH" => pathstr)
+    config = replace(config, "OPENRESTY_LUA_PACKAGE_CPATH" => cpathstr)
     open(conffile(ctx), "w") do f
         write(f, config)
     end
