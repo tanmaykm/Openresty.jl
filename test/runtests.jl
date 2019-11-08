@@ -15,6 +15,7 @@ http {
     access_log $workdir/logs/access.log;
     error_log $workdir/logs/error.log debug;
     lua_package_path 'OPENRESTY_LUA_PACKAGE_PATH';
+    lua_package_cpath 'OPENRESTY_LUA_PACKAGE_CPATH';
     include       mime.types;
     server {
         listen 8080;
@@ -62,21 +63,18 @@ function test(; sudo::Bool=false)
     cfgfile = createconfig(workdir, sudo)
     nginx = OpenrestyCtx(workdir; sudo=sudo)
 
-    tmpdir1 = mktempdir()
-    tmpdir2 = mktempdir()
-    @info("setting up Openresty", workdir, tmpdir1, tmpdir2)
+    @info("setting up Openresty", workdir)
 
     # incorrect lua path should throw error
-    @test_throws Exception setup(nginx, cfgfile; lua_package_path=joinpath(tmpdir1, "mylualibs"))
-    # setup with correct lua path
-    @test nothing === setup(nginx, cfgfile; lua_package_path=tmpdir1)
+    @test nothing === setup(nginx, cfgfile; lua_package_path="~/lua/?.lua", lua_package_cpath="~/lua/?.so")
     @test isfile(Openresty.conffile(nginx))
     confstr = read(Openresty.conffile(nginx), String)
-    userlib1 = joinpath(Openresty.user_lua_lib_folder(nginx,tmpdir1), "?.lua")
-    syslib = "$(Openresty.luadir(nginx))/lualib/?.lua"
-    @test occursin(userlib1, confstr)
-    @test occursin(syslib, confstr)
-    @test occursin("$syslib;$userlib1;;", confstr)
+    @test occursin("~/lua/?.lua", confstr)
+    @test occursin(Openresty.luapath, confstr)
+    @test occursin("$(Openresty.luapath);~/lua/?.lua;;", confstr)
+    @test occursin("~/lua/?.so", confstr)
+    @test occursin(Openresty.luacpath, confstr)
+    @test occursin("$(Openresty.luacpath);~/lua/?.so;;", confstr)
 
     @info("starting Openresty")
     start(nginx)
@@ -106,12 +104,10 @@ function test(; sudo::Bool=false)
 
     @test_throws Exception setup(nginx, cfgfile)
     @test nothing === setup(nginx, cfgfile; force=true)
-    @test nothing === setup(nginx, cfgfile; force=true, lua_package_path=[tmpdir1, tmpdir2])
+    @test nothing === setup(nginx, cfgfile; force=true, lua_package_path=["~/lua/?.lua", "/a/different/path"], lua_package_cpath=["~/lua/?.so", "/a/different/cpath"])
 
     @info("cleaning up")
     rm(workdir; recursive=true, force=true)
-    rm(tmpdir1; recursive=true, force=true)
-    rm(tmpdir2; recursive=true, force=true)
     @info("done")
 
     nothing
