@@ -2,18 +2,21 @@ using Test
 using Openresty
 using HTTP
 
-function createconfig(workdir::String, sudo::Bool=false)
+function createconfig(workdir::String, sudo::Bool=false, log_to_files::Bool=true)
     me = ENV["USER"]
     user = sudo ? "user $me $me;" : ""
+    error_log = string("error_log ", log_to_files ? "$workdir/logs/error.log" : "/dev/stderr", " debug;")
+    access_log = string("access_log ", log_to_files ? "$workdir/logs/access.log" : "/dev/stdout", ";")
+
     cfg = """$user
 worker_processes  1;
-error_log $workdir/logs/error.log debug;
+$error_log
 events {
     worker_connections  1024;
 }
 http {
-    access_log $workdir/logs/access.log;
-    error_log $workdir/logs/error.log debug;
+    $access_log
+    $error_log
     lua_package_path 'OPENRESTY_LUA_PACKAGE_PATH';
     lua_package_cpath 'OPENRESTY_LUA_PACKAGE_CPATH';
     include       mime.types;
@@ -56,12 +59,18 @@ function test_nginx_config()
     nothing
 end
 
-function test(; sudo::Bool=false)
-    @info("testing with sudo=$sudo")
+function test(; sudo::Bool=false, log_to_files::Bool=true)
+    @info("testing with sudo=$sudo, log_to_files=$log_to_files")
     workdir = mktempdir()
     mkpath(workdir)
-    cfgfile = createconfig(workdir, sudo)
+    cfgfile = createconfig(workdir, sudo, log_to_files)
     nginx = OpenrestyCtx(workdir; sudo=sudo)
+
+    accesslog = nothing
+    errorlog = nothing
+    if !log_to_files
+        accesslog = errorlog = PipeBuffer()
+    end
 
     @info("setting up Openresty", workdir)
 
@@ -77,7 +86,7 @@ function test(; sudo::Bool=false)
     @test occursin("$(Openresty.luacpath);~/lua/?.so;;", confstr)
 
     @info("starting Openresty")
-    start(nginx)
+    start(nginx; accesslog=accesslog, errorlog=errorlog)
     sleep(2)
     @test isfile(Openresty.pidfile(nginx))
     @test isrunning(nginx)
@@ -85,7 +94,7 @@ function test(; sudo::Bool=false)
     test_nginx_config()
 
     @info("restarting Openresty")
-    restart(nginx; delay_seconds=2)
+    restart(nginx; delay_seconds=2, accesslog=accesslog, errorlog=errorlog)
     sleep(2)
     @test isfile(Openresty.pidfile(nginx))
     @test isrunning(nginx)
@@ -99,8 +108,16 @@ function test(; sudo::Bool=false)
     sleep(2)
     @test !isfile(Openresty.pidfile(nginx))
     @test !isrunning(nginx)
-    @test isfile(Openresty.accesslogfile(nginx))
-    @test isfile(Openresty.errorlogfile(nginx))
+    if log_to_files
+        @test isfile(Openresty.accesslogfile(nginx))
+        @test isfile(Openresty.errorlogfile(nginx))
+    else
+        logbytes = readavailable(accesslog)
+        @test !isempty(logbytes)
+        strbytes = String(logbytes)
+        @test findfirst("start worker processes", strbytes) !== nothing
+        @test findfirst("HTTP", strbytes) !== nothing
+    end
 
     @test_throws Exception setup(nginx, cfgfile)
     @test nothing === setup(nginx, cfgfile; force=true)
@@ -113,5 +130,22 @@ function test(; sudo::Bool=false)
     nothing
 end
 
-test(; sudo=false)
-test(; sudo=true)
+function sudo_available()
+    cmd = `sudo -n ls`
+    try
+        run(pipeline(`sudo -n ls`, stdout=devnull, stderr=devnull))
+        return true
+    catch
+        return false
+    end
+end
+
+for log_to_files in (true,false)
+    test(; sudo=false, log_to_files=log_to_files)
+
+    if sudo_available()
+        test(; sudo=true, log_to_files=log_to_files)
+    else
+        @info("passwordless sudo not available, skipping sudo tests")
+    end
+end
