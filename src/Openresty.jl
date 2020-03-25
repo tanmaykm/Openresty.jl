@@ -95,11 +95,16 @@ function set_lua_package_path(ctx::OpenrestyCtx, lua_package_path::Union{String,
     nothing
 end
 
-function start(ctx::OpenrestyCtx)
+function start(ctx::OpenrestyCtx; accesslog=nothing, errorlog=nothing, append::Bool=(isa(accesslog,AbstractString)||isa(errorlog,AbstractString)))
     config = conffile(ctx)
     @debug("starting", openresty, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
     command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir)` : `$openresty -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
-    run(command; wait=false)
+    if (accesslog === nothing) && (errorlog === nothing)
+        run(command; wait=false)
+    else
+        redirected_command = pipeline(command, stdout=accesslog, stderr=errorlog, append=append)
+        run(redirected_command; wait=false)
+    end
     sleep(1)
     readpid(ctx)
     nothing
@@ -136,10 +141,10 @@ function stop(ctx::OpenrestyCtx; grace_seconds::Int=2)
     nothing
 end
 
-function restart(ctx::OpenrestyCtx; delay_seconds::Int=0)
+function restart(ctx::OpenrestyCtx; delay_seconds::Int=0, accesslog=nothing, errorlog=nothing, append::Bool=(isa(accesslog,AbstractString)||isa(errorlog,AbstractString)))
     stop(ctx)
     (delay_seconds > 0) && sleep(delay_seconds)
-    start(ctx)
+    start(ctx; accesslog=accesslog, errorlog=errorlog, append=append)
 end
 reopen(ctx::OpenrestyCtx) = signalreopen(ctx)
 reload(ctx::OpenrestyCtx) = signalreload(ctx)
