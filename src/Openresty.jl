@@ -100,13 +100,17 @@ function start(ctx::OpenrestyCtx; accesslog=nothing, errorlog=nothing, append::B
     @debug("starting", openresty, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
     command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir)` : `$openresty -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
     if (accesslog === nothing) && (errorlog === nothing)
-        run(command; wait=false)
+        proc = run(command; wait=false)
     else
         redirected_command = pipeline(command, stdout=accesslog, stderr=errorlog, append=append)
-        run(redirected_command; wait=false)
+        proc = run(redirected_command; wait=false)
     end
-    sleep(1)
-    readpid(ctx)
+
+    for idx in 1:15
+        sleep(1)
+        readpid(ctx)
+        ((ctx.pid === nothing) && process_running(proc)) || break  # wait until nginx comes up on a slow system
+    end
     nothing
 end
 
@@ -167,6 +171,8 @@ function readpid(ctx::OpenrestyCtx)
     if isfile(pfile)
         ctx.pid = parse(Int, read(pidfile(ctx), String))
         isrunning(ctx)
+    else
+        ctx.pid = nothing
     end
     nothing
 end
