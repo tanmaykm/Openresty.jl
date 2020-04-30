@@ -2,13 +2,15 @@ using Test
 using Openresty
 using HTTP
 
-function createconfig(workdir::String, sudo::Bool=false, log_to_files::Bool=true)
+function createconfig(workdir::String, sudo::Bool=false, log_to_files::Bool=true, daemon::Bool=false)
     me = ENV["USER"]
     user = sudo ? "user $me $me;" : ""
     error_log = string("error_log ", log_to_files ? "$workdir/logs/error.log" : "/dev/stderr", " debug;")
     access_log = string("access_log ", log_to_files ? "$workdir/logs/access.log" : "/dev/stdout", ";")
+    daemon_mode = daemon ? "on" : "off";
 
     cfg = """$user
+daemon $daemon_mode;
 worker_processes  1;
 $error_log
 events {
@@ -59,11 +61,21 @@ function test_nginx_config()
     nothing
 end
 
-function test(; sudo::Bool=false, log_to_files::Bool=true)
-    @info("testing with sudo=$sudo, log_to_files=$log_to_files")
+function count_requests(logcontents::String)
+    nrequests = 0
+    for line in readlines(IOBuffer(logcontents))
+        if match(r"\"GET\s\/\sHTTP\/1\.1\" 200", line) !== nothing
+            nrequests += 1
+        end
+    end
+    nrequests
+end
+
+function test(; sudo::Bool=false, log_to_files::Bool=true, daemon::Bool=false)
+    @info("starting tests", sudo, log_to_files, daemon)
     workdir = mktempdir()
     mkpath(workdir)
-    cfgfile = createconfig(workdir, sudo, log_to_files)
+    cfgfile = createconfig(workdir, sudo, log_to_files, daemon)
     nginx = OpenrestyCtx(workdir; sudo=sudo)
 
     accesslog = nothing
@@ -117,6 +129,14 @@ function test(; sudo::Bool=false, log_to_files::Bool=true)
         strbytes = String(logbytes)
         @test findfirst("start worker processes", strbytes) !== nothing
         @test findfirst("HTTP", strbytes) !== nothing
+
+        # test that when daemon is off, we are able to capture access logs even after a reload
+        # but in daemon mode we are not able to (because of https://trac.nginx.org/nginx/ticket/1715#ticket)
+        if daemon
+            @test count_requests(strbytes) == 1
+        else
+            @test count_requests(strbytes) == 2
+        end
     end
 
     @test_throws Exception setup(nginx, cfgfile)
@@ -141,11 +161,13 @@ function sudo_available()
 end
 
 for log_to_files in (true,false)
-    test(; sudo=false, log_to_files=log_to_files)
+    for daemon in (true, false)
+        test(; sudo=false, log_to_files=log_to_files, daemon=daemon)
 
-    if sudo_available()
-        test(; sudo=true, log_to_files=log_to_files)
-    else
-        @info("passwordless sudo not available, skipping sudo tests")
+        if sudo_available()
+            test(; sudo=true, log_to_files=log_to_files)
+        else
+            @info("passwordless sudo not available, skipping sudo tests")
+        end
     end
 end
