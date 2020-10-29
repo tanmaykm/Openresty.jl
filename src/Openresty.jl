@@ -1,25 +1,15 @@
 module Openresty
 
-include("../deps/deps.jl")
+using Openresty_jll
 
 export OpenrestyCtx
 export setup, start, stop, restart, isrunning, reopen, reload
 
-const nginxbindir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/sbin"))
-const htmltemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/html"))
-const conftemplatedir = abspath(joinpath(dirname(@__FILE__), "../deps/usr/nginx/conf"))
-const luapath = joinpath(dirname(dirname(nginxbindir)), "lualib", "?.lua")
-const luacpath = joinpath(dirname(dirname(nginxbindir)), "lualib", "?.so")
-
-function __init__()
-    check_deps()
-    if !isdir(htmltemplatedir)
-        error("$(htmltemplatedir) does not exist, Please re-run Pkg.build(\"Openresty\"), and restart Julia.")
-    end
-    if !isdir(conftemplatedir)
-        error("$(conftemplatedir) does not exist, Please re-run Pkg.build(\"Openresty\"), and restart Julia.")
-    end
-end
+const nginxbindir = joinpath(nginx_dir, "sbin")
+const htmltemplatedir = joinpath(nginx_dir, "html")
+const conftemplatedir = joinpath(nginx_dir, "conf")
+const luapath = joinpath(lualib_dir, "?.lua")
+const luacpath = joinpath(lualib_dir, "?.so")
 
 mutable struct OpenrestyCtx
     workdir::String
@@ -97,13 +87,15 @@ end
 
 function start(ctx::OpenrestyCtx; accesslog=nothing, errorlog=nothing, append::Bool=(isa(accesslog,AbstractString)||isa(errorlog,AbstractString)))
     config = conffile(ctx)
-    @debug("starting", openresty, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
-    command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir)` : `$openresty -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
-    if (accesslog === nothing) && (errorlog === nothing)
-        proc = run(command; wait=false)
-    else
-        redirected_command = pipeline(command, stdout=accesslog, stderr=errorlog, append=append)
-        proc = run(redirected_command; wait=false)
+    proc = openresty() do openresty_path
+        @debug("starting", openresty_path, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
+        command = Cmd(ctx.sudo ? `sudo $openresty_path -p $(ctx.workdir)` : `$openresty_path -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
+        if (accesslog === nothing) && (errorlog === nothing)
+            run(command; wait=false)
+        else
+            redirected_command = pipeline(command, stdout=accesslog, stderr=errorlog, append=append)
+            run(redirected_command; wait=false)
+        end
     end
 
     for idx in 1:15
@@ -118,10 +110,11 @@ isrunning(ctx::OpenrestyCtx) = (ctx.pid !== nothing) ? isrunning(ctx, ctx.pid) :
 function isrunning(ctx::OpenrestyCtx, pid::Int)
     # we do have read permission on cmdline even if process was started with sudo
     cmdlinefile = "/proc/$pid/cmdline"
+    openresty_path = openresty(p->p)
     if isfile(cmdlinefile)
         cmdline = read(cmdlinefile, String)
-        @debug("found command line", cmdlinefile, cmdline , openresty, ctx.workdir)
-        if occursin(openresty, cmdline) && occursin(ctx.workdir, cmdline)
+        @debug("found command line", cmdlinefile, cmdline , openresty_path, ctx.workdir)
+        if occursin(openresty_path, cmdline) && occursin(ctx.workdir, cmdline)
             # process still running
             return true
         end
@@ -160,8 +153,10 @@ signalreload(ctx::OpenrestyCtx) = signal(ctx, "reload")
 function signal(ctx::OpenrestyCtx, signal::String)
     if isrunning(ctx)
         @debug("sending signal $signal")
-        command = Cmd(ctx.sudo ? `sudo $openresty -p $(ctx.workdir) -s $signal` : `$openresty -p $(ctx.workdir) -s $signal`; dir=nginxbindir)
-        run(command)
+        openresty() do openresty_path
+            command = Cmd(ctx.sudo ? `sudo $openresty_path -p $(ctx.workdir) -s $signal` : `$openresty_path -p $(ctx.workdir) -s $signal`; dir=nginxbindir)
+            run(command)
+        end
     end
     nothing
 end
