@@ -3,14 +3,14 @@ uuid = "7d4ad63e-389f-5fab-a457-725f5c98637d"
 keywords = ["openresty", "nginx", "julia"]
 license = "MIT"
 desc = "Launch and manage Openresty (Nginx) from Julia"
-version = "0.1.6"
+version = "0.2.0"
 
 [deps]
-BinaryProvider = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
-Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+Openresty_jll = "87da34d4-7b1b-5a94-8376-8cb65bf3132c"
 
 [compat]
-julia = "≥ 1.1.0"
+julia = "≥ 1.3.0"
+Openresty_jll = "1.15.8"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
