@@ -86,7 +86,6 @@ function set_lua_package_path(ctx::OpenrestyCtx, lua_package_path::Union{String,
 end
 
 function start(ctx::OpenrestyCtx; accesslog=nothing, errorlog=nothing, append::Bool=(isa(accesslog,AbstractString)||isa(errorlog,AbstractString)))
-    config = conffile(ctx)
     proc = openresty() do openresty_path
         @debug("starting", openresty_path, workdir=ctx.workdir, nginxbindir, sudo=ctx.sudo)
         command = Cmd(ctx.sudo ? `sudo $openresty_path -p $(ctx.workdir)` : `$openresty_path -p $(ctx.workdir)`; detach=true, dir=nginxbindir)
@@ -98,10 +97,12 @@ function start(ctx::OpenrestyCtx; accesslog=nothing, errorlog=nothing, append::B
         end
     end
 
-    for idx in 1:15
-        sleep(1)
+    # Wait until nginx comes up on a slow system.
+    # Does not throw error though if a running nginx process is not detected,
+    # leaves it to the caller to do the final check
+    timedwait(15.0; pollint=1.0) do
         readpid(ctx)
-        ((ctx.pid === nothing) && process_running(proc)) || break  # wait until nginx comes up on a slow system
+        !((ctx.pid === nothing) && process_running(proc))
     end
     nothing
 end
@@ -138,12 +139,24 @@ function stop(ctx::OpenrestyCtx; grace_seconds::Int=2)
     nothing
 end
 
+"""
+Do a full stop and start. Disrupts the service while nginx restarts and also for the duration specified in `delay_seconds` seconds.
+Logs are redirected afresh.
+"""
 function restart(ctx::OpenrestyCtx; delay_seconds::Int=0, accesslog=nothing, errorlog=nothing, append::Bool=(isa(accesslog,AbstractString)||isa(errorlog,AbstractString)))
     stop(ctx)
     (delay_seconds > 0) && sleep(delay_seconds)
     start(ctx; accesslog=accesslog, errorlog=errorlog, append=append)
 end
+
+"""
+Reopen log files without disruption.
+"""
 reopen(ctx::OpenrestyCtx) = signalreopen(ctx)
+
+"""
+Reload any configuration changes without disruption.
+"""
 reload(ctx::OpenrestyCtx) = signalreload(ctx)
 
 signalstop(ctx::OpenrestyCtx) = signal(ctx, "stop")
