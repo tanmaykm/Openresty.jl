@@ -80,6 +80,8 @@ function test(; sudo::Bool=false, log_to_files::Bool=true, daemon::Bool=false)
 
     accesslog = nothing
     errorlog = nothing
+    accesslog2 = nothing
+    errorlog2 = nothing
     if !log_to_files
         accesslog = errorlog = PipeBuffer()
     end
@@ -106,7 +108,13 @@ function test(; sudo::Bool=false, log_to_files::Bool=true, daemon::Bool=false)
     test_nginx_config()
 
     @info("restarting Openresty")
-    restart(nginx; delay_seconds=2, accesslog=accesslog, errorlog=errorlog)
+    if !log_to_files
+        # we need to create new IOs because they may be closed when the process restarts
+        accesslog2 = errorlog2 = PipeBuffer()
+        flush(accesslog)
+    end
+    restart(nginx; delay_seconds=2, accesslog=accesslog2, errorlog=errorlog2)
+
     sleep(2)
     @test isfile(Openresty.pidfile(nginx))
     @test isrunning(nginx)
@@ -124,9 +132,12 @@ function test(; sudo::Bool=false, log_to_files::Bool=true, daemon::Bool=false)
         @test isfile(Openresty.accesslogfile(nginx))
         @test isfile(Openresty.errorlogfile(nginx))
     else
+        flush(accesslog2)
         logbytes = readavailable(accesslog)
+        logbytes2 = readavailable(accesslog2)
         @test !isempty(logbytes)
-        strbytes = String(logbytes)
+        @test !isempty(logbytes2)
+        strbytes = String(logbytes) * String(logbytes2)
         @test findfirst("start worker processes", strbytes) !== nothing
         @test findfirst("HTTP", strbytes) !== nothing
 
