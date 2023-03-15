@@ -177,8 +177,16 @@ end
 function readpid(ctx::OpenrestyCtx)
     pfile = pidfile(ctx)
     if isfile(pfile)
-        ctx.pid = parse(Int, read(pidfile(ctx), String))
-        isrunning(ctx)
+        pid = tryparse(Int, read(pfile, String))
+        if isnothing(pid)
+            @warn "Removing corrupted PID file: $(pfile)"
+            # The `rm` may throw if the process doesn't have the the permissions
+            # to remove the PID file.
+            rm(pfile)
+            ctx.pid = nothing
+        else
+            isrunning(ctx)
+        end
     else
         ctx.pid = nothing
     end
